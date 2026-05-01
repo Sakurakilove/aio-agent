@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::io::{self, Write};
 use crate::config::Config;
-use crate::gateway::{GatewayConfig, ChannelAccount, ChannelType};
+use crate::adapters::types::{ChannelAccount, ChannelType};
 
 #[derive(Debug, Clone)]
 pub enum SetupMode {
@@ -186,7 +186,7 @@ impl SetupWizard {
         let api_model_env = std::env::var("AIO_AGENT_MODEL").ok();
 
         config.llm.api_key = api_key_env.unwrap_or_else(|| {
-            prompt_input("API密钥", "sk-your-api-key")
+            prompt_input("API密钥", "sk-")
         });
 
         config.llm.base_url = api_url_env.unwrap_or_else(|| {
@@ -208,28 +208,20 @@ impl SetupWizard {
         println!("  [2] Password\n");
         let auth_choice = prompt_input("选择 (1-2)", "1");
 
-        let gateway = if auth_choice == "1" {
+        let token = if auth_choice == "1" {
             let token = generate_random_token();
             println!("\n已生成网关Token: {}", mask_secret(&token));
-            GatewayConfig {
-                port: gateway_port,
-                auth_token: Some(token),
-                ..Default::default()
-            }
+            Some(token)
         } else {
             let password = prompt_input("设置网关密码", "password");
-            GatewayConfig {
-                port: gateway_port,
-                auth_token: Some(password),
-                ..Default::default()
-            }
+            Some(password)
         };
 
         config.channels.insert("default".to_string(), crate::config::ChannelConfig {
             enabled: true,
             host: "127.0.0.1".to_string(),
-            port: gateway.port,
-            auth_token: gateway.auth_token.clone(),
+            port: gateway_port,
+            auth_token: token,
         });
 
         config.memory.path = "~/.aio-agent/memory.db".to_string();
