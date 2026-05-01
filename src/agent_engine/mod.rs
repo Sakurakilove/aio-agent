@@ -23,6 +23,10 @@ use crate::human_in_loop::HumanInTheLoop;
 use crate::checkpoint::{CheckpointManager, Checkpoint, StateSnapshot};
 use crate::handoff::HandoffManager;
 use crate::output_parser::OutputParser;
+use crate::agents::{Crew, Agent as CrewAgent, Process};
+use crate::tasks::Task;
+use crate::skills::SkillManager;
+use crate::streaming::StreamingLlmProvider;
 
 /// Agent执行结果，包含最终响应、消息历史和统计信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +74,7 @@ pub struct AioAgent {
     pub checkpoint_manager: Option<CheckpointManager>,
     pub handoff_manager: Option<HandoffManager>,
     pub output_parser: OutputParser,
+    pub skill_manager: Option<SkillManager>,
 }
 
 impl AioAgent {
@@ -162,6 +167,7 @@ impl AioAgent {
             checkpoint_manager,
             handoff_manager: None,
             output_parser: OutputParser,
+            skill_manager: SkillManager::new().ok(),
         })
     }
 
@@ -376,6 +382,79 @@ impl AioAgent {
     /// 使用OutputParser解析LLM输出为结构化格式
     pub fn parse_output(&self, content: &str) -> crate::output_parser::ParsedOutput {
         self.output_parser.parse(content)
+    }
+
+    /// 创建并执行Crew多Agent协作任务
+    pub async fn run_crew(
+        &mut self,
+        agents: Vec<CrewAgent>,
+        tasks: Vec<Task>,
+        process: Process,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let crew = Crew::new(agents, tasks, process)
+            .with_llm(LlmProvider::new(
+                &self.llm_provider.api_key,
+                &self.llm_provider.base_url,
+                &self.llm_provider.default_model,
+            ));
+
+        self.callbacks.emit(
+            CallbackEventType::AgentStart,
+            &self.session_id,
+            serde_json::json!({"action": "crew_kickoff"}),
+        );
+
+        let results = crew.kickoff().await?;
+
+        self.callbacks.emit(
+            CallbackEventType::AgentEnd,
+            &self.session_id,
+            serde_json::json!({"action": "crew_completed", "tasks_completed": results.len()}),
+        );
+
+        Ok(results)
+    }
+
+    /// 列出已注册的Skills
+    pub fn list_skills(&self) -> Vec<String> {
+        self.skill_manager.as_ref()
+            .map(|sm| sm.list_skills().iter().map(|s| s.metadata.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// 搜索匹配的Skills
+    pub fn search_skills(&self, query: &str) -> Vec<String> {
+        self.skill_manager.as_ref()
+            .map(|sm| sm.search_skills(query).iter().map(|s| s.metadata.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// 使用流式模式与LLM对话，实时输出token
+    pub async fn stream_conversation(&self, user_message: &str) -> Result<String> {
+        let provider = StreamingLlmProvider::new(
+            &self.llm_provider.api_key,
+            &self.llm_provider.base_url,
+            &self.llm_provider.default_model,
+        );
+
+        let mut messages = vec![
+            crate::streaming::StreamingMessage::system(&self.config.agent.system_prompt),
+        ];
+
+        for msg in &self.messages {
+            match msg.role {
+                Role::User => messages.push(crate::streaming::StreamingMessage::user(&msg.content)),
+                Role::Assistant => messages.push(crate::streaming::StreamingMessage::assistant(&msg.content)),
+                _ => {}
+            }
+        }
+
+        messages.push(crate::streaming::StreamingMessage::user(user_message));
+
+        let stream = provider.stream_chat_simple(messages).await?;
+        let response = crate::streaming::print_stream(stream).await?;
+
+        Ok(response)
     }
 
     /// 从持久化存储加载指定会话，恢复消息历史（含tool_calls和tool_call_id）

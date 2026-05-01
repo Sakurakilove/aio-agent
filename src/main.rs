@@ -37,7 +37,7 @@ mod checkpoint;
 
 #[derive(Parser)]
 #[command(name = "aio-agent")]
-#[command(version = "1.3.0")]
+#[command(version = "1.4.0")]
 #[command(about = "All In One Agent - 集成化一站式AI Agent解决方案", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -276,11 +276,11 @@ async fn run_delegate(task: &str, max_iterations: usize, config_path: Option<&st
     let mut agent = agent_engine::AioAgent::new(config)?;
 
     println!("正在委派任务: {}", task);
-    let delegation_id = agent.delegate_task(task, max_iterations).await?;
-    println!("委派ID: {}", delegation_id);
+    let result = agent.delegate_task(task, max_iterations).await?;
+    println!("委派结果: {}", result);
 
     let stats = agent.get_stats();
-    println!("委派成功: {} 个委派, {} 个成功",
+    println!("委派统计: {} 个委派创建, {} 个成功",
         stats.delegations_created, stats.delegations_succeeded);
 
     Ok(())

@@ -96,6 +96,19 @@ impl CliApp {
         }
     }
 
+    /// 使用流式模式处理问题
+    fn handle_question_stream(&mut self, rt: &mut tokio::runtime::Runtime, question: &str) {
+        println!("处理中(流式): {}...\n\n", question);
+        match rt.block_on(self.agent.stream_conversation(question)) {
+            Ok(response) => {
+                println!("\n\n[响应长度: {} 字符]", response.len());
+            }
+            Err(e) => {
+                eprintln!("流式错误: {}", e);
+            }
+        }
+    }
+
     fn handle_command(&mut self, cmd: &str, args: &str) {
         match cmd {
             "/tools" => {
@@ -141,7 +154,28 @@ impl CliApp {
                 }
             }
             "/skills" => {
-                println!("Skills管理需要使用Skills模块");
+                if args.is_empty() {
+                    let skills = self.agent.list_skills();
+                    if skills.is_empty() {
+                        println!("暂无已注册的Skills");
+                    } else {
+                        println!("已注册Skills ({} 个):", skills.len());
+                        for skill in &skills {
+                            println!("  - {}", skill);
+                        }
+                    }
+                    println!("\n用法: /skills <search_query>  - 搜索Skills");
+                } else {
+                    let results = self.agent.search_skills(args);
+                    if results.is_empty() {
+                        println!("未找到匹配 '{}' 的Skills", args);
+                    } else {
+                        println!("搜索结果 ({} 个):", results.len());
+                        for skill in &results {
+                            println!("  - {}", skill);
+                        }
+                    }
+                }
             }
             "/handoff" => {
                 if args.is_empty() {
@@ -188,6 +222,41 @@ impl CliApp {
                     }
                 }
             }
+            "/stream" => {
+                if args.is_empty() {
+                    println!("用法: /stream <question>  - 流式模式对话");
+                } else {
+                    let mut rt2 = tokio::runtime::Runtime::new().unwrap();
+                    self.handle_question_stream(&mut rt2, args);
+                }
+            }
+            "/crew" => {
+                if args.is_empty() {
+                    println!("用法: /crew <task_description>  - 使用Crew多Agent协作");
+                    println!("将创建研究员+分析师+写作者的Crew来完成任务");
+                } else {
+                    let crew_agents = vec![
+                        crate::agents::Agent::new("1", "研究员", "搜索和分析信息", "专业研究员"),
+                        crate::agents::Agent::new("2", "分析师", "分析数据", "数据分析专家"),
+                        crate::agents::Agent::new("3", "写作者", "撰写报告", "专业写作者"),
+                    ];
+                    let tasks = vec![
+                        crate::tasks::Task::new("t1", &format!("研究: {}", args)),
+                        crate::tasks::Task::new("t2", &format!("分析: {}", args)),
+                        crate::tasks::Task::new("t3", &format!("撰写关于'{}'的报告", args)),
+                    ];
+                    let mut rt2 = tokio::runtime::Runtime::new().unwrap();
+                    match rt2.block_on(self.agent.run_crew(crew_agents, tasks, crate::agents::Process::Sequential)) {
+                        Ok(results) => {
+                            println!("✓ Crew任务完成 ({} 个任务):", results.len());
+                            for (id, result) in &results {
+                                println!("\n--- 任务 {} ---\n{}", id, result.chars().take(500).collect::<String>());
+                            }
+                        }
+                        Err(e) => eprintln!("✗ Crew执行失败: {}", e),
+                    }
+                }
+            }
             _ => {
                 println!("未知命令: {}", cmd);
                 println!("输入 'help' 查看可用命令");
@@ -198,13 +267,15 @@ impl CliApp {
     fn show_help(&self) {
         println!("\n可用命令:");
         println!("  /ask <问题> 或 /q <问题>  - 向Agent提问");
+        println!("  /stream <问题>            - 流式模式对话");
         println!("  /tools                    - 查看可用工具");
         println!("  /config                   - 查看当前配置");
         println!("  /memory                   - 查看记忆会话");
         println!("  /provider [名称]          - 查看/切换提供商");
         println!("  /handoff [agent] [reason] - 查看/执行Agent转交");
+        println!("  /crew <task>              - Crew多Agent协作");
         println!("  /parse <text>             - 解析输出为结构化格式");
-        println!("  /skills                   - 查看Skills");
+        println!("  /skills [query]           - 查看/搜索Skills");
         println!("  status                    - 显示Agent状态");
         println!("  clear                     - 清屏");
         println!("  help                      - 显示此帮助");

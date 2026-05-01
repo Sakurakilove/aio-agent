@@ -84,6 +84,76 @@ pub struct ProviderStatsResponse {
     pub tools_count: usize,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct HandoffRequest {
+    pub target_agent: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HandoffResponse {
+    pub success: bool,
+    pub accepted: bool,
+    pub agent_name: String,
+    pub response: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CheckpointsResponse {
+    pub checkpoints: Vec<CheckpointInfo>,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CheckpointInfo {
+    pub id: String,
+    pub session_id: String,
+    pub step: usize,
+    pub messages_summary: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SkillsResponse {
+    pub skills: Vec<String>,
+    pub count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CrewRequest {
+    pub agents: Vec<CrewAgentRequest>,
+    pub tasks: Vec<CrewTaskRequest>,
+    #[serde(default = "default_process")]
+    pub process: String,
+}
+
+fn default_process() -> String {
+    "sequential".to_string()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CrewAgentRequest {
+    pub id: String,
+    pub role: String,
+    pub goal: String,
+    pub backstory: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CrewTaskRequest {
+    pub id: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrewResponse {
+    pub success: bool,
+    pub results: std::collections::HashMap<String, String>,
+    pub tasks_completed: usize,
+}
+
 pub async fn start_server(config: Config, host: &str, port: u16) -> Result<()> {
     let agent = AioAgent::new(config)?;
     let state = Arc::new(ServerState {
@@ -104,6 +174,11 @@ pub async fn start_server(config: Config, host: &str, port: u16) -> Result<()> {
         .route("/providers/switch", post(switch_provider))
         .route("/providers/stats", get(get_provider_stats))
         .route("/memory/sessions", get(list_memory_sessions))
+        .route("/handoff", post(execute_handoff))
+        .route("/handoff/agents", get(list_handoff_agents))
+        .route("/checkpoints", get(list_checkpoints))
+        .route("/skills", get(list_skills_api))
+        .route("/crew", post(execute_crew))
         .with_state(state)
         .layer(cors);
 
@@ -226,4 +301,106 @@ async fn list_memory_sessions(State(state): State<Arc<ServerState>>) -> Json<Mem
         count: sessions.len(),
         sessions,
     })
+}
+
+async fn execute_handoff(
+    State(state): State<Arc<ServerState>>,
+    Json(request): Json<HandoffRequest>,
+) -> Json<HandoffResponse> {
+    let mut agent = state.agent.lock().await;
+    if agent.handoff_manager.is_none() {
+        agent.enable_handoff();
+    }
+    let reason = request.reason.unwrap_or_else(|| "API handoff request".to_string());
+    match agent.handoff_to(&request.target_agent, &reason).await {
+        Ok(result) => Json(HandoffResponse {
+            success: true,
+            accepted: result.accepted,
+            agent_name: result.agent_name,
+            response: result.response,
+        }),
+        Err(e) => Json(HandoffResponse {
+            success: false,
+            accepted: false,
+            agent_name: String::new(),
+            response: format!("Handoff error: {}", e),
+        }),
+    }
+}
+
+async fn list_handoff_agents(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
+    let agent = state.agent.lock().await;
+    if agent.handoff_manager.is_none() {
+        Json(serde_json::json!({"agents": [], "count": 0}))
+    } else {
+        let agents: Vec<serde_json::Value> = agent.list_handoff_agents().iter().map(|a| {
+            serde_json::json!({
+                "name": a.name,
+                "tools": a.tools,
+                "handoff_targets": a.handoff_targets,
+            })
+        }).collect();
+        Json(serde_json::json!({"agents": agents, "count": agents.len()}))
+    }
+}
+
+async fn list_checkpoints(State(state): State<Arc<ServerState>>) -> Json<CheckpointsResponse> {
+    let agent = state.agent.lock().await;
+    if let Some(ref checkpoint_mgr) = agent.checkpoint_manager {
+        match checkpoint_mgr.list_checkpoints(&agent.session_id) {
+            Ok(checkpoints) => {
+                let infos: Vec<CheckpointInfo> = checkpoints.iter().map(|c| CheckpointInfo {
+                    id: c.id.clone(),
+                    session_id: c.session_id.clone(),
+                    step: c.step,
+                    messages_summary: c.messages_summary.clone(),
+                    created_at: c.created_at,
+                }).collect();
+                let count = infos.len();
+                Json(CheckpointsResponse { checkpoints: infos, count })
+            }
+            Err(_) => Json(CheckpointsResponse { checkpoints: vec![], count: 0 }),
+        }
+    } else {
+        Json(CheckpointsResponse { checkpoints: vec![], count: 0 })
+    }
+}
+
+async fn list_skills_api(State(state): State<Arc<ServerState>>) -> Json<SkillsResponse> {
+    let agent = state.agent.lock().await;
+    let skills = agent.list_skills();
+    let count = skills.len();
+    Json(SkillsResponse { skills, count })
+}
+
+async fn execute_crew(
+    State(state): State<Arc<ServerState>>,
+    Json(request): Json<CrewRequest>,
+) -> Json<CrewResponse> {
+    let mut agent = state.agent.lock().await;
+    let crew_agents: Vec<crate::agents::Agent> = request.agents.iter().map(|a| {
+        crate::agents::Agent::new(&a.id, &a.role, &a.goal, &a.backstory)
+    }).collect();
+
+    let tasks: Vec<crate::tasks::Task> = request.tasks.iter().map(|t| {
+        crate::tasks::Task::new(&t.id, &t.description)
+    }).collect();
+
+    let process = match request.process.as_str() {
+        "hierarchical" => crate::agents::Process::Hierarchical,
+        _ => crate::agents::Process::Sequential,
+    };
+
+    match agent.run_crew(crew_agents, tasks, process).await {
+        Ok(results) => Json(CrewResponse {
+            success: true,
+            tasks_completed: results.len(),
+            results,
+        }),
+        Err(e) => Json(CrewResponse {
+            success: false,
+            results: std::collections::HashMap::new(),
+            tasks_completed: 0,
+        }),
+    }
 }
