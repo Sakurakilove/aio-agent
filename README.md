@@ -1,10 +1,12 @@
 <div align="center">
 
+<img src="images/logo.png" alt="AIO Agent Logo" width="200" height="auto">
+
 # 🤖 AIO Agent
 
 **Production-Grade AI Agent Framework in Rust**
 
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/Sakurakilove/aio-agent/releases)
+[![Version](https://img.shields.io/badge/version-1.4.1-blue.svg)](https://github.com/Sakurakilove/aio-agent/releases)
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
@@ -360,3 +362,10 @@ deny = []
 - **PydanticAI** - 结构化输出、类型安全
 - **Semantic Kernel** - 企业级连接器
 - **Smolagents** - Code Agent 范式
+
+---
+
+<div align="center">
+  <img src="images/avatar.png" alt="Sakurakilove" width="40" height="40">
+  <p><a href="https://github.com/Sakurakilove">Sakurakilove</a></p>
+</div>
