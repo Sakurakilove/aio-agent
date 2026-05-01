@@ -1,0 +1,33 @@
+[agent]
+model = "gpt-5.2"
+max_iterations = 90
+timeout_seconds = 1800
+system_prompt = "You are a helpful AI assistant that can use tools to help users complete tasks. Please choose appropriate tools based on the user's needs and provide clear answers after obtaining results."
+
+[llm]
+api_key = "sk-420a9faf7d965f0a3ce6045d7d7409eca88591d309308ff510bc037008e908ed"
+base_url = "https://astraldev.sakuraki.love/v1"
+
+[providers]
+active = "astraldev"
+
+[[providers.providers]]
+name = "astraldev"
+api_key = "sk-420a9faf7d965f0a3ce6045d7d7409eca88591d309308ff510bc037008e908ed"
+base_url = "https://astraldev.sakuraki.love/v1"
+models = ["gpt-5.2", "gpt-4o", "gpt-4", "claude-3-5-sonnet-20241022"]
+default_model = "gpt-5.2"
+enabled = true
+
+[memory]
+provider = "sqlite"
+path = "~/.aio-agent/memory.db"
+max_sessions = 100
+
+[tools]
+enabled = []
+disabled = []
+
+[permissions]
+allow = ["execute(file_read)", "execute(file_write)", "execute(web_search)", "execute(web_fetch)", "execute(list_dir)", "execute(terminal)"]
+deny = ["execute(rm -rf /)", "execute(sudo rm -rf)", "execute(format c:)"]

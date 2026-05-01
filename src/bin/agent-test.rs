@@ -447,7 +447,8 @@ fn test_message_system() -> anyhow::Result<()> {
     assert_eq!(tool_msg.tool_calls.as_ref().unwrap().len(), 1, "应有1个工具调用");
     println!("工具调用消息: {} 个工具调用", tool_msg.tool_calls.as_ref().unwrap().len());
     
-    let result_msg = Message::with_tool_result(
+    let result_msg = Message::tool_result(
+        "call_123".to_string(),
         "搜索完成，找到3条结果".to_string(),
         serde_json::json!({"results": ["result1", "result2", "result3"]}),
     );

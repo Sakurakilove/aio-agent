@@ -232,33 +232,8 @@ async fn run_single_query(message: &str, config_path: Option<&str>, stream: bool
     let config = load_config(config_path)?;
 
     if stream {
-        let active_provider = config.providers.providers.iter()
-            .find(|p| p.name == config.providers.active && p.enabled)
-            .or_else(|| config.providers.providers.iter().find(|p| p.enabled));
-
-        let (api_key, base_url, model) = if let Some(provider) = active_provider {
-            (provider.api_key.clone(), provider.base_url.clone(), provider.default_model.clone())
-        } else {
-            (
-                std::env::var("AIO_AGENT_API_KEY").unwrap_or_default(),
-                std::env::var("AIO_AGENT_API_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
-                std::env::var("AIO_AGENT_MODEL").unwrap_or_else(|_| "gpt-4".to_string()),
-            )
-        };
-
-        let provider = streaming::StreamingLlmProvider::new(
-            &api_key,
-            &base_url,
-            &model,
-        );
-
-        let messages = vec![
-            streaming::StreamingMessage::system("你是一个有用的AI助手"),
-            streaming::StreamingMessage::user(message),
-        ];
-
-        let stream = provider.stream_chat_simple(messages).await?;
-        let response = streaming::print_stream(stream).await?;
+        let agent = agent_engine::AioAgent::new(config)?;
+        let response = agent.stream_conversation(message).await?;
         println!("\n\n[完整响应长度: {} 字符]", response.len());
     } else {
         let mut agent = agent_engine::AioAgent::new(config)?;

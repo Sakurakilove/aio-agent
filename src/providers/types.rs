@@ -24,7 +24,7 @@ pub enum MessageRole {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: MessageRole,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -32,6 +32,18 @@ pub struct ChatMessage {
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+}
+
+fn deserialize_nullable_string<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match opt {
+        Some(serde_json::Value::String(s)) => Ok(Some(s)),
+        Some(serde_json::Value::Null) | None => Ok(None),
+        Some(v) => Ok(Some(v.to_string())),
+    }
 }
 
 impl ChatMessage {
@@ -112,11 +124,16 @@ pub struct ChatCompletionRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChatCompletionResponse {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub object: String,
+    #[serde(default)]
     pub created: u64,
+    #[serde(default)]
     pub model: String,
     pub choices: Vec<Choice>,
+    #[serde(default)]
     pub usage: Option<Usage>,
 }
 
@@ -124,13 +141,17 @@ pub struct ChatCompletionResponse {
 pub struct Choice {
     pub index: u32,
     pub message: ChatMessage,
+    #[serde(default)]
     pub finish_reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Usage {
+    #[serde(default)]
     pub prompt_tokens: u32,
+    #[serde(default)]
     pub completion_tokens: u32,
+    #[serde(default)]
     pub total_tokens: u32,
 }
 

@@ -329,19 +329,18 @@ async fn execute_handoff(
 }
 
 async fn list_handoff_agents(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
-    let agent = state.agent.lock().await;
+    let mut agent = state.agent.lock().await;
     if agent.handoff_manager.is_none() {
-        Json(serde_json::json!({"agents": [], "count": 0}))
-    } else {
-        let agents: Vec<serde_json::Value> = agent.list_handoff_agents().iter().map(|a| {
+        agent.enable_handoff();
+    }
+    let agents: Vec<serde_json::Value> = agent.list_handoff_agents().iter().map(|a| {
             serde_json::json!({
                 "name": a.name,
                 "tools": a.tools,
                 "handoff_targets": a.handoff_targets,
             })
         }).collect();
-        Json(serde_json::json!({"agents": agents, "count": agents.len()}))
-    }
+    Json(serde_json::json!({"agents": agents, "count": agents.len()}))
 }
 
 async fn list_checkpoints(State(state): State<Arc<ServerState>>) -> Json<CheckpointsResponse> {
