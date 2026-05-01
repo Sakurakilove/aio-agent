@@ -37,7 +37,7 @@ mod checkpoint;
 
 #[derive(Parser)]
 #[command(name = "aio-agent")]
-#[command(version = "1.4.0")]
+#[command(version = "1.4.1")]
 #[command(about = "All In One Agent - 集成化一站式AI Agent解决方案", long_about = None)]
 struct Cli {
     #[command(subcommand)]
