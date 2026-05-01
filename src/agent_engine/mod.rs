@@ -16,6 +16,9 @@ use crate::errors::{ApiError, ErrorClassifier, RetryPolicy, RetryResult};
 use crate::delegation::{DelegationManager, DelegationPolicy, SubAgentRequest};
 use crate::providers::{LlmProvider, ChatMessage as LlmChatMessage, MessageRole as LlmMessageRole, ToolDefinition, FunctionDefinition, ToolCall};
 use crate::callbacks::{CallbackManager, CallbackEventType};
+use crate::guardrails::GuardrailManager;
+use crate::human_in_loop::HumanInTheLoop;
+use crate::checkpoint::{CheckpointManager, Checkpoint, StateSnapshot};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentResult {
@@ -54,6 +57,9 @@ pub struct AioAgent {
     pub stats: AgentStats,
     pub compressed_context: Option<CompressedContext>,
     pub callbacks: CallbackManager,
+    pub guardrails: GuardrailManager,
+    pub human_in_loop: HumanInTheLoop,
+    pub checkpoint_manager: Option<CheckpointManager>,
 }
 
 impl AioAgent {
@@ -134,6 +140,9 @@ impl AioAgent {
             },
             compressed_context: None,
             callbacks: CallbackManager::new(),
+            guardrails: GuardrailManager::with_defaults(),
+            human_in_loop: HumanInTheLoop::console(true),
+            checkpoint_manager: None,
         })
     }
 
@@ -348,6 +357,18 @@ impl AioAgent {
 
         self.add_message(Role::User, user_message.to_string());
 
+        let guardrail_result = self.guardrails.validate_input(user_message);
+        if !guardrail_result.passed {
+            return Ok(AgentResult {
+                final_response: format!("输入被Guardrails拦截: {}", guardrail_result.message),
+                messages: self.messages.clone(),
+                iterations: 0,
+                context_compressed: false,
+                delegation_count: 0,
+                errors_encountered: 0,
+            });
+        }
+
         self.callbacks.emit(
             CallbackEventType::AgentStart,
             &self.session_id,
@@ -426,6 +447,40 @@ impl AioAgent {
                                 );
 
                                 if self.permissions.check("execute", tool_name) {
+                                    if self.human_in_loop.needs_approval(tool_name) {
+                                        let approval_request = crate::human_in_loop::ApprovalRequest {
+                                            id: uuid::Uuid::new_v4().to_string(),
+                                            action_type: tool_name.to_string(),
+                                            description: format!("执行工具 '{}' 并传递参数", tool_name),
+                                            details: tool_args.clone(),
+                                            risk_level: match tool_name {
+                                                "terminal" => crate::human_in_loop::RiskLevel::High,
+                                                "file_write" | "remove" | "move" => crate::human_in_loop::RiskLevel::Medium,
+                                                _ => crate::human_in_loop::RiskLevel::Low,
+                                            },
+                                        };
+
+                                        let approval = self.human_in_loop.request_approval(approval_request);
+                                        match approval {
+                                            crate::human_in_loop::HumanApproval::Rejected(reason) => {
+                                                let error_data = serde_json::json!({"error": format!("用户拒绝执行: {}", reason)});
+                                                let tool_msg = Message::tool_result(
+                                                    tool_call_id,
+                                                    format!("用户拒绝执行工具 '{}': {}", tool_name, reason),
+                                                    error_data,
+                                                );
+                                                self.messages.push(tool_msg);
+                                                continue;
+                                            }
+                                            crate::human_in_loop::HumanApproval::Modified(modified) => {
+                                                let modified_args = serde_json::from_str(&modified)
+                                                    .unwrap_or(tool_args.clone());
+                                                let _ = modified_args;
+                                            }
+                                            crate::human_in_loop::HumanApproval::Approved => {}
+                                        }
+                                    }
+
                                     match self.tools.execute(tool_name, tool_args).await {
                                         Ok(tool_result) => {
                                             let tool_output = if tool_result.success {
@@ -535,6 +590,27 @@ impl AioAgent {
             &self.session_id,
             serde_json::json!({"iterations": iterations, "errors": errors_encountered}),
         );
+
+        let output_guardrail = self.guardrails.validate_output(&final_response);
+        if !output_guardrail.passed {
+            final_response = format!("⚠️ 输出被Guardrails拦截: {}\n\n原始输出已被过滤。", output_guardrail.message);
+        }
+
+        if let Some(ref checkpoint_mgr) = self.checkpoint_manager {
+            let checkpoint = Checkpoint {
+                id: uuid::Uuid::new_v4().to_string(),
+                session_id: self.session_id.clone(),
+                agent_name: "default".to_string(),
+                step: iterations,
+                state: serde_json::json!({
+                    "messages_count": self.messages.len(),
+                    "final_response_length": final_response.len(),
+                }),
+                messages_summary: final_response.chars().take(200).collect(),
+                created_at: chrono::Utc::now().timestamp_millis(),
+            };
+            let _ = checkpoint_mgr.save_checkpoint(&checkpoint);
+        }
 
         Ok(AgentResult {
             final_response,

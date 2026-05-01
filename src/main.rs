@@ -29,6 +29,11 @@ mod delegation;
 mod adapters;
 mod interrupt;
 mod callbacks;
+mod guardrails;
+mod output_parser;
+mod human_in_loop;
+mod handoff;
+mod checkpoint;
 
 #[derive(Parser)]
 #[command(name = "aio-agent")]
