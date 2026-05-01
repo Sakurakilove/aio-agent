@@ -453,7 +453,7 @@ impl AioAgent {
                                             action_type: tool_name.to_string(),
                                             description: format!("执行工具 '{}' 并传递参数", tool_name),
                                             details: tool_args.clone(),
-                                            risk_level: match tool_name {
+                                            risk_level: match tool_name.as_str() {
                                                 "terminal" => crate::human_in_loop::RiskLevel::High,
                                                 "file_write" | "remove" | "move" => crate::human_in_loop::RiskLevel::Medium,
                                                 _ => crate::human_in_loop::RiskLevel::Low,

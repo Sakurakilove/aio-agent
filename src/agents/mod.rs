@@ -123,10 +123,10 @@ impl Crew {
             let mut messages = vec![ChatMessage::system(&agent.build_system_prompt())];
 
             if !context.is_empty() {
-                messages.push(ChatMessage::user(format!("之前的上下文:\n{}", context)));
+                messages.push(ChatMessage::user(&format!("之前的上下文:\n{}", context)));
             }
 
-            messages.push(ChatMessage::user(task.to_string()));
+            messages.push(ChatMessage::user(task));
 
             let request = ChatCompletionRequest {
                 model: provider.default_model.clone(),
