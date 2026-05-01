@@ -42,7 +42,15 @@ pub struct MemoryManager {
 
 impl MemoryManager {
     pub fn new(db_path: &str) -> Result<Self> {
-        let path = db_path.replace("~/", &format!("{}/", std::env::var("HOME").unwrap_or_default()));
+        let path = if db_path.starts_with("~/") {
+            if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
+                format!("{}{}", home, &db_path[1..])
+            } else {
+                db_path.to_string()
+            }
+        } else {
+            db_path.to_string()
+        };
 
         if let Some(parent) = PathBuf::from(&path).parent() {
             std::fs::create_dir_all(parent)?;

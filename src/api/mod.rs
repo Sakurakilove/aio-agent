@@ -38,6 +38,50 @@ pub struct StatusResponse {
     pub model: String,
     pub tools_count: usize,
     pub session_id: String,
+    pub active_provider: String,
+    pub providers_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SwitchProviderRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SwitchProviderResponse {
+    pub success: bool,
+    pub message: String,
+    pub provider_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListProvidersResponse {
+    pub providers: Vec<ProviderInfoResponse>,
+    pub active: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProviderInfoResponse {
+    pub name: String,
+    pub base_url: String,
+    pub default_model: String,
+    pub models: Vec<String>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MemorySessionsResponse {
+    pub sessions: Vec<String>,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProviderStatsResponse {
+    pub current_provider: String,
+    pub current_model: String,
+    pub current_base_url: String,
+    pub available_providers: Vec<String>,
+    pub tools_count: usize,
 }
 
 pub async fn start_server(config: Config, host: &str, port: u16) -> Result<()> {
@@ -56,6 +100,10 @@ pub async fn start_server(config: Config, host: &str, port: u16) -> Result<()> {
         .route("/status", get(get_status))
         .route("/chat", post(chat))
         .route("/tools", get(list_tools))
+        .route("/providers", get(list_providers))
+        .route("/providers/switch", post(switch_provider))
+        .route("/providers/stats", get(get_provider_stats))
+        .route("/memory/sessions", get(list_memory_sessions))
         .with_state(state)
         .layer(cors);
 
@@ -82,9 +130,11 @@ async fn get_status(State(state): State<Arc<ServerState>>) -> Json<StatusRespons
     Json(StatusResponse {
         status: "running".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        model: agent.config.agent.model.clone(),
+        model: agent.llm_provider.default_model.clone(),
         tools_count: agent.tools.list_tools().len(),
         session_id: agent.session_id.clone(),
+        active_provider: agent.config.providers.active.clone(),
+        providers_count: agent.config.providers.providers.len(),
     })
 }
 
@@ -114,4 +164,66 @@ async fn list_tools(State(state): State<Arc<ServerState>>) -> Json<serde_json::V
         "tools": tools,
         "count": tools.len()
     }))
+}
+
+async fn list_providers(State(state): State<Arc<ServerState>>) -> Json<ListProvidersResponse> {
+    let agent = state.agent.lock().await;
+    let providers: Vec<ProviderInfoResponse> = agent.config.providers.providers.iter().map(|p| {
+        ProviderInfoResponse {
+            name: p.name.clone(),
+            base_url: p.base_url.clone(),
+            default_model: p.default_model.clone(),
+            models: p.models.clone(),
+            enabled: p.enabled,
+        }
+    }).collect();
+
+    Json(ListProvidersResponse {
+        providers,
+        active: agent.config.providers.active.clone(),
+    })
+}
+
+async fn switch_provider(
+    State(state): State<Arc<ServerState>>,
+    Json(request): Json<SwitchProviderRequest>,
+) -> Json<SwitchProviderResponse> {
+    let mut agent = state.agent.lock().await;
+    match agent.switch_provider(&request.name) {
+        Ok(()) => Json(SwitchProviderResponse {
+            success: true,
+            message: format!("已切换到提供商: {}", request.name),
+            provider_name: request.name,
+        }),
+        Err(e) => Json(SwitchProviderResponse {
+            success: false,
+            message: format!("切换失败: {}", e),
+            provider_name: request.name,
+        }),
+    }
+}
+
+async fn get_provider_stats(State(state): State<Arc<ServerState>>) -> Json<ProviderStatsResponse> {
+    let agent = state.agent.lock().await;
+    let available_providers: Vec<String> = agent.config.providers.providers.iter()
+        .filter(|p| p.enabled)
+        .map(|p| p.name.clone())
+        .collect();
+
+    Json(ProviderStatsResponse {
+        current_provider: agent.config.providers.active.clone(),
+        current_model: agent.llm_provider.default_model.clone(),
+        current_base_url: agent.llm_provider.base_url.clone(),
+        available_providers,
+        tools_count: agent.tools.list_tools().len(),
+    })
+}
+
+async fn list_memory_sessions(State(state): State<Arc<ServerState>>) -> Json<MemorySessionsResponse> {
+    let agent = state.agent.lock().await;
+    let sessions = agent.memory.list_sessions().unwrap_or_default();
+    Json(MemorySessionsResponse {
+        count: sessions.len(),
+        sessions,
+    })
 }

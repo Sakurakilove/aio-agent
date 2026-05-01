@@ -28,6 +28,7 @@ mod scheduler;
 mod delegation;
 mod adapters;
 mod interrupt;
+mod callbacks;
 
 #[derive(Parser)]
 #[command(name = "aio-agent")]
@@ -226,10 +227,24 @@ async fn run_single_query(message: &str, config_path: Option<&str>, stream: bool
     let config = load_config(config_path)?;
 
     if stream {
+        let active_provider = config.providers.providers.iter()
+            .find(|p| p.name == config.providers.active && p.enabled)
+            .or_else(|| config.providers.providers.iter().find(|p| p.enabled));
+
+        let (api_key, base_url, model) = if let Some(provider) = active_provider {
+            (provider.api_key.clone(), provider.base_url.clone(), provider.default_model.clone())
+        } else {
+            (
+                std::env::var("AIO_AGENT_API_KEY").unwrap_or_default(),
+                std::env::var("AIO_AGENT_API_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
+                std::env::var("AIO_AGENT_MODEL").unwrap_or_else(|_| "gpt-4".to_string()),
+            )
+        };
+
         let provider = streaming::StreamingLlmProvider::new(
-            &config.llm.api_key,
-            &config.llm.base_url,
-            &config.agent.model,
+            &api_key,
+            &base_url,
+            &model,
         );
 
         let messages = vec![
@@ -322,17 +337,24 @@ async fn run_status(config_path: Option<&str>) -> Result<()> {
     println!("  委派创建: {}", stats.delegations_created);
     println!("  委派成功: {}", stats.delegations_succeeded);
 
+    println!("\n当前提供商: {} (模型: {})", agent.config.providers.active, agent.llm_provider.default_model);
+    println!("  API地址: {}", agent.llm_provider.base_url);
+
+    println!("\n已配置提供商:");
+    for p in &agent.config.providers.providers {
+        let marker = if p.name == agent.config.providers.active { " ★" } else { "" };
+        let status = if p.enabled { "启用" } else { "禁用" };
+        println!("  - {} ({}) - 模型: {} 个{}", p.name, status, p.models.len(), marker);
+    }
+
+    println!("\n已注册工具: {} 个", agent.tools.list_tools().len());
+    for tool in agent.tools.list_tools() {
+        println!("  - {}", tool);
+    }
+
     println!("\n平台适配器:");
     for adapter in adapters::AdapterFactory::list_adapters() {
         println!("  - {}", adapter);
-    }
-
-    println!("\n提供商:");
-    let mut pm = providers::ProviderManager::new();
-    pm.add_provider(providers::ProviderInfo::openai(""));
-    pm.add_provider(providers::ProviderInfo::ollama("http://localhost:11434"));
-    for p in pm.list_providers() {
-        println!("  - {} ({} 模型)", p.name, p.models.len());
     }
 
     Ok(())

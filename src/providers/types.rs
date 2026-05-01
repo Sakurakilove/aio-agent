@@ -22,11 +22,12 @@ pub enum MessageRole {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: MessageRole,
-    pub content: String,
+    #[serde(default)]
+    pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<ToolCall>,
+    pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
 }
@@ -35,7 +36,7 @@ impl ChatMessage {
     pub fn system(content: &str) -> Self {
         Self {
             role: MessageRole::System,
-            content: content.to_string(),
+            content: Some(content.to_string()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -45,7 +46,7 @@ impl ChatMessage {
     pub fn user(content: &str) -> Self {
         Self {
             role: MessageRole::User,
-            content: content.to_string(),
+            content: Some(content.to_string()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -55,7 +56,7 @@ impl ChatMessage {
     pub fn assistant(content: &str) -> Self {
         Self {
             role: MessageRole::Assistant,
-            content: content.to_string(),
+            content: Some(content.to_string()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -198,7 +199,7 @@ impl LlmProvider {
         let response = self.chat_completion(request).await?;
 
         if let Some(choice) = response.choices.first() {
-            Ok(choice.message.content.clone())
+            Ok(choice.message.content.clone().unwrap_or_default())
         } else {
             anyhow::bail!("API响应中没有找到选择")
         }

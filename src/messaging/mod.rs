@@ -24,6 +24,8 @@ pub struct Message {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<DateTime<Utc>>,
@@ -37,6 +39,7 @@ impl Message {
             role,
             content,
             tool_calls: None,
+            tool_call_id: None,
             tool_result: None,
             timestamp: Some(Utc::now()),
             metadata: HashMap::new(),
@@ -60,17 +63,19 @@ impl Message {
             role: Role::Assistant,
             content,
             tool_calls: Some(tool_calls),
+            tool_call_id: None,
             tool_result: None,
             timestamp: Some(Utc::now()),
             metadata: HashMap::new(),
         }
     }
 
-    pub fn with_tool_result(content: String, result: serde_json::Value) -> Self {
+    pub fn tool_result(tool_call_id: String, content: String, result: serde_json::Value) -> Self {
         Self {
             role: Role::Tool,
             content,
             tool_calls: None,
+            tool_call_id: Some(tool_call_id),
             tool_result: Some(result),
             timestamp: Some(Utc::now()),
             metadata: HashMap::new(),

@@ -83,9 +83,9 @@ impl StreamingLlmProvider {
 
     pub fn default_config() -> Self {
         Self::new(
-            "sk-cp-vUQjxoDhpkc-meCpmfEZssdWCJRstdwUV4gZtmvQx3PJpKpIJKEor3DR_gQqCQTUzi0piMUWF9tKuchOVrM5PODhFue48vXaXAl5AX5GdeK0RbBTLzlyHmo",
-            "https://astraldev.sakuraki.love/v1",
-            "gpt-5.2",
+            &std::env::var("AIO_AGENT_API_KEY").unwrap_or_default(),
+            &std::env::var("AIO_AGENT_API_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
+            &std::env::var("AIO_AGENT_MODEL").unwrap_or_else(|_| "gpt-4".to_string()),
         )
     }
 
