@@ -70,6 +70,8 @@ pub struct Config {
     #[serde(default)]
     pub llm: LlmConfig,
     #[serde(default)]
+    pub providers: ProvidersConfig,
+    #[serde(default)]
     pub memory: MemoryConfig,
     #[serde(default)]
     pub tools: ToolsConfig,
@@ -105,6 +107,84 @@ pub struct MemoryConfig {
     pub path: String,
     #[serde(default = "default_max_sessions")]
     pub max_sessions: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    pub name: String,
+    pub api_key: String,
+    pub base_url: String,
+    pub models: Vec<String>,
+    pub default_model: String,
+    pub enabled: bool,
+}
+
+impl ProviderConfig {
+    pub fn openai(api_key: &str) -> Self {
+        Self {
+            name: "openai".to_string(),
+            api_key: api_key.to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            models: vec!["gpt-4o".to_string(), "gpt-4-turbo".to_string(), "gpt-4".to_string(), "gpt-3.5-turbo".to_string()],
+            default_model: "gpt-4o".to_string(),
+            enabled: true,
+        }
+    }
+
+    pub fn anthropic(api_key: &str) -> Self {
+        Self {
+            name: "anthropic".to_string(),
+            api_key: api_key.to_string(),
+            base_url: "https://api.anthropic.com/v1".to_string(),
+            models: vec!["claude-3-5-sonnet-20241022".to_string(), "claude-3-opus-20240229".to_string()],
+            default_model: "claude-3-5-sonnet-20241022".to_string(),
+            enabled: true,
+        }
+    }
+
+    pub fn ollama(host: &str) -> Self {
+        Self {
+            name: "ollama".to_string(),
+            api_key: String::new(),
+            base_url: format!("{}/v1", host.trim_end_matches('/')),
+            models: vec!["llama3.1:70b".to_string(), "qwen2.5:72b".to_string(), "mistral".to_string()],
+            default_model: "llama3.1:70b".to_string(),
+            enabled: true,
+        }
+    }
+
+    pub fn custom(name: &str, api_key: &str, base_url: &str, models: Vec<String>) -> Self {
+        let default_model = models.first().cloned().unwrap_or_default();
+        Self {
+            name: name.to_string(),
+            api_key: api_key.to_string(),
+            base_url: base_url.to_string(),
+            models,
+            default_model,
+            enabled: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvidersConfig {
+    #[serde(default)]
+    pub providers: Vec<ProviderConfig>,
+    #[serde(default = "default_active_provider")]
+    pub active: String,
+}
+
+fn default_active_provider() -> String {
+    "openai".to_string()
+}
+
+impl Default for ProvidersConfig {
+    fn default() -> Self {
+        Self {
+            providers: vec![ProviderConfig::openai("")],
+            active: "openai".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +231,7 @@ impl Default for Config {
         Self {
             agent: AgentConfig::default(),
             llm: LlmConfig::default(),
+            providers: ProvidersConfig::default(),
             memory: MemoryConfig::default(),
             tools: ToolsConfig::default(),
             channels: HashMap::new(),
@@ -215,6 +296,9 @@ impl Config {
         } else if path.ends_with(".yaml") || path.ends_with(".yml") {
             let config: Config = serde_yaml::from_str(&content)?;
             Ok(config)
+        } else if path.ends_with(".toml") {
+            let config: Config = toml::from_str(&content)?;
+            Ok(config)
         } else {
             anyhow::bail!("Unsupported config format: {}", path)
         }
@@ -225,6 +309,8 @@ impl Config {
             serde_json::to_string_pretty(self)?
         } else if path.ends_with(".yaml") || path.ends_with(".yml") {
             serde_yaml::to_string(self)?
+        } else if path.ends_with(".toml") {
+            toml::to_string_pretty(self)?
         } else {
             anyhow::bail!("Unsupported config format: {}", path)
         };

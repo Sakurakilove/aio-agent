@@ -111,6 +111,48 @@ enum Commands {
 
     #[command(about = "运行系统诊断")]
     Doctor,
+
+    #[command(about = "模型管理", subcommand)]
+    Model(ModelCommand),
+}
+
+#[derive(Subcommand)]
+enum ModelCommand {
+    #[command(about = "列出所有模型提供商")]
+    List,
+
+    #[command(about = "切换当前使用的模型提供商")]
+    Switch {
+        #[arg(help = "提供商名称 (openai/anthropic/ollama/custom)")]
+        name: String,
+    },
+
+    #[command(about = "添加新的模型提供商")]
+    Add {
+        #[arg(long, help = "提供商名称")]
+        name: String,
+
+        #[arg(long, help = "API密钥")]
+        api_key: Option<String>,
+
+        #[arg(long, help = "API基础地址", default_value = "https://api.openai.com/v1")]
+        base_url: String,
+
+        #[arg(long, help = "可用模型列表，逗号分隔")]
+        models: Option<String>,
+
+        #[arg(long, help = "默认模型")]
+        default_model: Option<String>,
+    },
+
+    #[command(about = "移除模型提供商")]
+    Remove {
+        #[arg(help = "提供商名称")]
+        name: String,
+    },
+
+    #[command(about = "测试当前模型连接")]
+    Test,
 }
 
 #[tokio::main]
@@ -154,6 +196,10 @@ async fn main() -> Result<()> {
 
         Some(Commands::Doctor) => {
             run_doctor()?;
+        }
+
+        Some(Commands::Model(model_cmd)) => {
+            run_model_command(model_cmd, cli.config.as_deref()).await?;
         }
 
         None => {
@@ -404,6 +450,167 @@ fn load_config(config_path: Option<&str>) -> Result<config::Config> {
     if let Some(path) = config_path {
         config::Config::from_file(path)
     } else {
+        let paths = vec![
+            "aio-agent.toml".to_string(),
+            "config.toml".to_string(),
+            dirs_next::home_dir()
+                .map(|h| h.join(".aio-agent").join("config.toml"))
+                .unwrap_or_default()
+                .display()
+                .to_string(),
+        ];
+
+        for path in paths {
+            if std::path::Path::new(&path).exists() {
+                if let Ok(config) = config::Config::from_file(&path) {
+                    println!("[信息] 使用配置文件: {}", path);
+                    return Ok(config);
+                }
+            }
+        }
+
         Ok(config::Config::default())
     }
+}
+
+async fn run_model_command(cmd: ModelCommand, config_path: Option<&str>) -> Result<()> {
+    let config_path_str = config_path.unwrap_or("aio-agent.toml");
+    let mut config = load_config(config_path)?;
+
+    match cmd {
+        ModelCommand::List => {
+            println!("\n可用的模型提供商:");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            for provider in &config.providers.providers {
+                let active = if provider.name == config.providers.active {
+                    " ★"
+                } else {
+                    "   "
+                };
+                let status = if provider.enabled { "启用" } else { "禁用" };
+                println!("{} {} ({}) - 模型: {} 个", active, provider.name, status, provider.models.len());
+                if provider.name == config.providers.active {
+                    println!("     默认模型: {}", provider.default_model);
+                    println!("     API地址: {}", provider.base_url);
+                }
+            }
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("当前活跃提供商: {}", config.providers.active);
+        }
+
+        ModelCommand::Switch { name } => {
+            let provider_exists = config.providers.providers.iter().any(|p| p.name == name);
+            if !provider_exists {
+                return Err(anyhow::anyhow!("提供商 '{}' 不存在，请先使用 'model add' 添加", name));
+            }
+
+            if let Some(provider) = config.providers.providers.iter().find(|p| p.name == name) {
+                if !provider.enabled {
+                    return Err(anyhow::anyhow!("提供商 '{}' 已禁用，请先启用", name));
+                }
+            }
+
+            config.providers.active = name.clone();
+            config.agent.model = config.providers.providers.iter()
+                .find(|p| p.name == name)
+                .map(|p| p.default_model.clone())
+                .unwrap_or_else(|| "gpt-4".to_string());
+
+            config.save_to_file(config_path_str)?;
+            println!("✓ 已切换到模型提供商: {}", name);
+            println!("  默认模型: {}", config.agent.model);
+        }
+
+        ModelCommand::Add { name, api_key, base_url, models, default_model } => {
+            let provider_exists = config.providers.providers.iter().any(|p| p.name == name);
+            if provider_exists {
+                return Err(anyhow::anyhow!("提供商 '{}' 已存在，请先移除再添加", name));
+            }
+
+            let key = api_key.unwrap_or_else(|| std::env::var("AIO_AGENT_API_KEY").unwrap_or_default());
+            let models_list = models.map(|m| m.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>())
+                .unwrap_or_else(|| vec!["gpt-4".to_string()]);
+            let default = default_model.unwrap_or_else(|| models_list.first().cloned().unwrap_or("gpt-4".to_string()));
+
+            let provider = config::ProviderConfig::custom(&name, &key, &base_url, models_list.clone());
+            config.providers.providers.push(provider);
+            config.save_to_file(config_path_str)?;
+
+            println!("✓ 已添加模型提供商: {}", name);
+            println!("  API地址: {}", base_url);
+            println!("  可用模型: {}", models_list.join(", "));
+            println!("  默认模型: {}", default);
+        }
+
+        ModelCommand::Remove { name } => {
+            let initial_len = config.providers.providers.len();
+            config.providers.providers.retain(|p| p.name != name);
+
+            if config.providers.providers.len() == initial_len {
+                return Err(anyhow::anyhow!("提供商 '{}' 不存在", name));
+            }
+
+            if config.providers.active == name {
+                if let Some(first) = config.providers.providers.first() {
+                    config.providers.active = first.name.clone();
+                }
+            }
+
+            config.save_to_file(config_path_str)?;
+            println!("✓ 已移除模型提供商: {}", name);
+        }
+
+        ModelCommand::Test => {
+            let active_provider = config.providers.providers.iter()
+                .find(|p| p.name == config.providers.active);
+
+            match active_provider {
+                Some(provider) => {
+                    println!("正在测试模型连接: {} ({})", provider.name, provider.default_model);
+
+                    let client = reqwest::Client::new();
+                    let url = format!("{}/chat/completions", provider.base_url);
+
+                    let body = serde_json::json!({
+                        "model": provider.default_model,
+                        "messages": [{"role": "user", "content": "Hello"}],
+                        "max_tokens": 10,
+                    });
+
+                    match client.post(&url)
+                        .header("Authorization", format!("Bearer {}", provider.api_key))
+                        .header("Content-Type", "application/json")
+                        .json(&body)
+                        .timeout(std::time::Duration::from_secs(10))
+                        .send()
+                        .await
+                    {
+                        Ok(response) => {
+                            let status = response.status();
+                            if status.is_success() {
+                                println!("✓ 模型连接成功!");
+                                println!("  提供商: {}", provider.name);
+                                println!("  模型: {}", provider.default_model);
+                                println!("  API地址: {}", provider.base_url);
+                            } else {
+                                let error_text = response.text().await.unwrap_or_default();
+                                println!("✗ 模型连接失败 (HTTP {})", status);
+                                println!("  错误: {}", error_text.chars().take(200).collect::<String>());
+                            }
+                        }
+                        Err(e) => {
+                            println!("✗ 模型连接失败");
+                            println!("  错误: {}", e);
+                        }
+                    }
+                }
+                None => {
+                    println!("✗ 没有找到活跃的模型提供商");
+                    println!("  请先使用 'model add' 添加提供商");
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
