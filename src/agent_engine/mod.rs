@@ -7,6 +7,8 @@ use crate::tools::{ToolRegistry, ToolResult, WebSearchTool, FileReadTool, FileWr
     WebFetchTool, SearchFilesTool, PatchFileTool, ListDirTool, JsonTool, UrlTool,
     TextTool, DateTimeTool, FileInfoTool, MkdirTool, RemoveTool, CopyTool, MoveTool,
     EnvTool, SystemInfoTool, CalculatorTool, Base64Tool, HashTool, RegexTool,
+    BrowserNavigateTool, BrowserScreenshotTool, BrowserClickTool, BrowserFillFormTool,
+    BrowserGetContentTool, BrowserEvaluateJsTool,
 };
 use crate::memory::MemoryManager;
 use crate::permissions::PermissionChecker;
@@ -20,6 +22,7 @@ use crate::guardrails::GuardrailManager;
 use crate::human_in_loop::HumanInTheLoop;
 use crate::checkpoint::{CheckpointManager, Checkpoint, StateSnapshot};
 
+/// Agent执行结果，包含最终响应、消息历史和统计信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentResult {
     pub final_response: String,
@@ -30,6 +33,7 @@ pub struct AgentResult {
     pub errors_encountered: usize,
 }
 
+/// Agent运行统计信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentStats {
     pub total_iterations: usize,
@@ -40,6 +44,8 @@ pub struct AgentStats {
     pub delegations_succeeded: usize,
 }
 
+/// AIO Agent核心结构体，集成LLM提供商、工具注册、权限控制、记忆管理、
+/// 预算控制、上下文压缩、委派管理、回调系统、Guardrails、人机协作和检查点等功能
 pub struct AioAgent {
     pub config: Config,
     pub llm_provider: LlmProvider,
@@ -63,6 +69,7 @@ pub struct AioAgent {
 }
 
 impl AioAgent {
+    /// 创建新的AioAgent实例，初始化所有子系统
     pub fn new(config: Config) -> Result<Self> {
         let session_id = uuid::Uuid::new_v4().to_string();
         let db_path = config.memory.path.clone();
@@ -107,6 +114,12 @@ impl AioAgent {
         tools.register(Arc::new(Base64Tool));
         tools.register(Arc::new(HashTool));
         tools.register(Arc::new(RegexTool));
+        tools.register(Arc::new(BrowserNavigateTool));
+        tools.register(Arc::new(BrowserScreenshotTool));
+        tools.register(Arc::new(BrowserClickTool));
+        tools.register(Arc::new(BrowserFillFormTool));
+        tools.register(Arc::new(BrowserGetContentTool));
+        tools.register(Arc::new(BrowserEvaluateJsTool));
 
         let permissions = PermissionChecker::new(
             config.permissions.allow.clone(),
@@ -115,6 +128,8 @@ impl AioAgent {
 
         let max_iterations = config.agent.max_iterations;
         let timeout = config.agent.timeout_seconds;
+
+        let checkpoint_manager = CheckpointManager::new(&db_path).ok();
 
         Ok(Self {
             config,
@@ -142,23 +157,26 @@ impl AioAgent {
             callbacks: CallbackManager::new(),
             guardrails: GuardrailManager::with_defaults(),
             human_in_loop: HumanInTheLoop::console(true),
-            checkpoint_manager: None,
+            checkpoint_manager,
         })
     }
 
+    /// 添加一条消息到消息历史
     pub fn add_message(&mut self, role: Role, content: String) {
         let message = Message::new(role, content);
         self.messages.push(message);
     }
 
+    /// 获取Agent运行统计信息
     pub fn get_stats(&self) -> &AgentStats {
         &self.stats
     }
 
+    /// 获取上下文信息摘要，包括消息数、预算使用和委派状态
     pub fn get_context_info(&self) -> String {
         let mut info = String::new();
         info.push_str(&format!("消息数: {}\n", self.messages.len()));
-        info.push_str(&format!("迭代预算: {}/{}\n", self.iteration_budget.used(), self.iteration_budget.remaining()));
+        info.push_str(&format!("迭代预算: {}/{}\n", self.iteration_budget.used(), self.iteration_budget.used() + self.iteration_budget.remaining()));
         info.push_str(&format!("工具预算: {}/{}\n", self.tool_budget.current_executions.load(std::sync::atomic::Ordering::SeqCst), self.tool_budget.max_executions));
         info.push_str(&format!("委派数: {}\n", self.delegation_manager.active_count()));
         if let Some(ctx) = &self.compressed_context {
@@ -167,6 +185,7 @@ impl AioAgent {
         info
     }
 
+    /// 将任务委派给子Agent执行，子Agent通过LLM独立完成任务
     pub async fn delegate_task(&mut self, task: &str, max_iterations: usize) -> Result<String> {
         if !self.delegation_manager.can_delegate() {
             return Err(anyhow::anyhow!("达到最大委派数量"));
@@ -197,12 +216,24 @@ impl AioAgent {
                 Role::System => LlmMessageRole::System,
                 Role::Tool => LlmMessageRole::Tool,
             };
+
+            let tool_calls = m.tool_calls.as_ref().map(|calls| {
+                calls.iter().map(|tc| ToolCall {
+                    id: tc.id.clone(),
+                    call_type: "function".to_string(),
+                    function: crate::providers::FunctionCall {
+                        name: tc.name.clone(),
+                        arguments: serde_json::to_string(&tc.arguments).unwrap_or_default(),
+                    },
+                }).collect::<Vec<_>>()
+            });
+
             LlmChatMessage {
                 role,
                 content: Some(m.content.clone()),
                 name: None,
-                tool_calls: None,
-                tool_call_id: None,
+                tool_calls,
+                tool_call_id: m.tool_call_id.clone(),
             }
         }).collect();
 
@@ -236,6 +267,7 @@ impl AioAgent {
         Ok(result)
     }
 
+    /// 当消息总长度超过阈值时压缩上下文，减少token消耗
     pub fn compress_context_if_needed(&mut self) {
         let total_length: usize = self.messages.iter().map(|m| m.content.len()).sum();
 
@@ -256,6 +288,7 @@ impl AioAgent {
         }
     }
 
+    /// 切换LLM提供商，更新活跃provider配置并触发回调事件
     pub fn switch_provider(&mut self, name: &str) -> Result<()> {
         let provider_config = self.config.providers.providers.iter()
             .find(|p| p.name == name && p.enabled)
@@ -278,6 +311,7 @@ impl AioAgent {
         Ok(())
     }
 
+    /// 从持久化存储加载指定会话，恢复消息历史（含tool_calls和tool_call_id）
     pub fn load_session(&mut self, session_id: &str) -> Result<()> {
         let session = self.memory.load_session(session_id)?
             .ok_or_else(|| anyhow::anyhow!("Session '{}' not found", session_id))?;
@@ -287,22 +321,41 @@ impl AioAgent {
 
         for msg_value in &session.messages {
             if let Some(role_str) = msg_value.get("role").and_then(|r| r.as_str()) {
-                if let Some(content) = msg_value.get("content").and_then(|c| c.as_str()) {
-                    let role = match role_str {
-                        "System" => Role::System,
-                        "User" => Role::User,
-                        "Assistant" => Role::Assistant,
-                        "Tool" => Role::Tool,
-                        _ => Role::User,
-                    };
-                    self.messages.push(Message::new(role, content.to_string()));
-                }
+                let role = match role_str {
+                    "System" => Role::System,
+                    "User" => Role::User,
+                    "Assistant" => Role::Assistant,
+                    "Tool" => Role::Tool,
+                    _ => Role::User,
+                };
+
+                let content = msg_value.get("content")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let tool_calls = msg_value.get("tool_calls").and_then(|tc| {
+                    serde_json::from_value::<Vec<crate::messaging::ToolCall>>(tc.clone()).ok()
+                });
+
+                let tool_call_id = msg_value.get("tool_call_id")
+                    .and_then(|id| id.as_str())
+                    .map(|s| s.to_string());
+
+                let tool_result = msg_value.get("tool_result").cloned();
+
+                let mut msg = Message::new(role, content);
+                msg.tool_calls = tool_calls;
+                msg.tool_call_id = tool_call_id;
+                msg.tool_result = tool_result;
+                self.messages.push(msg);
             }
         }
 
         Ok(())
     }
 
+    /// 将内部消息格式转换为LLM API消息格式，保留tool_calls和tool_call_id
     fn build_llm_messages(&self) -> Vec<LlmChatMessage> {
         self.messages.iter().map(|m| {
             let role = match m.role {
@@ -333,6 +386,7 @@ impl AioAgent {
         }).collect()
     }
 
+    /// 从工具注册表构建OpenAI格式的工具定义列表
     fn build_tool_definitions(&self) -> Vec<ToolDefinition> {
         self.tools.get_all_schemas().iter().filter_map(|schema| {
             let name = schema.get("name")?.as_str()?.to_string();
@@ -350,9 +404,11 @@ impl AioAgent {
         }).collect()
     }
 
+    /// 核心对话循环：接收用户消息，通过ReAct模式（LLM→工具调用→执行→反馈→继续）
+    /// 与LLM交互，支持Guardrails验证、HITL审批、检查点保存和回调事件
     pub async fn run_conversation(&mut self, user_message: &str) -> Result<AgentResult> {
         if self.messages.is_empty() {
-            self.add_message(Role::System, "你是一个有用的AI助手，可以使用工具来帮助用户完成任务。请根据用户的需求选择合适的工具，并在获得结果后给出清晰的回答。".to_string());
+            self.add_message(Role::System, self.config.agent.system_prompt.clone());
         }
 
         self.add_message(Role::User, user_message.to_string());
@@ -446,6 +502,8 @@ impl AioAgent {
                                     serde_json::json!({"tool": tool_name, "call_id": tool_call_id}),
                                 );
 
+                                let mut effective_args = tool_args.clone();
+
                                 if self.permissions.check("execute", tool_name) {
                                     if self.human_in_loop.needs_approval(tool_name) {
                                         let approval_request = crate::human_in_loop::ApprovalRequest {
@@ -473,15 +531,15 @@ impl AioAgent {
                                                 continue;
                                             }
                                             crate::human_in_loop::HumanApproval::Modified(modified) => {
-                                                let modified_args = serde_json::from_str(&modified)
-                                                    .unwrap_or(tool_args.clone());
-                                                let _ = modified_args;
+                                                if let Ok(modified_args) = serde_json::from_str(&modified) {
+                                                    effective_args = modified_args;
+                                                }
                                             }
                                             crate::human_in_loop::HumanApproval::Approved => {}
                                         }
                                     }
 
-                                    match self.tools.execute(tool_name, tool_args).await {
+                                    match self.tools.execute(tool_name, effective_args).await {
                                         Ok(tool_result) => {
                                             let tool_output = if tool_result.success {
                                                 tool_result.data.clone().unwrap_or(serde_json::json!(null))
@@ -578,10 +636,22 @@ impl AioAgent {
         }
 
         let messages_json: Vec<serde_json::Value> = self.messages.iter()
-            .map(|m| serde_json::json!({
-                "role": format!("{:?}", m.role),
-                "content": m.content,
-            }))
+            .map(|m| {
+                let mut obj = serde_json::json!({
+                    "role": format!("{:?}", m.role),
+                    "content": m.content,
+                });
+                if let Some(ref tc) = m.tool_calls {
+                    obj["tool_calls"] = serde_json::to_value(tc).unwrap_or_default();
+                }
+                if let Some(ref id) = m.tool_call_id {
+                    obj["tool_call_id"] = serde_json::to_value(id).unwrap_or_default();
+                }
+                if let Some(ref result) = m.tool_result {
+                    obj["tool_result"] = result.clone();
+                }
+                obj
+            })
             .collect();
         self.memory.save_session(&self.session_id, &messages_json)?;
 

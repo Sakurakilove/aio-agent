@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::pin::Pin;
 
+/// 流式LLM提供商，支持SSE流式响应
 pub struct StreamingLlmProvider {
     pub client: Client,
     pub api_key: String,
@@ -89,6 +90,7 @@ impl StreamingLlmProvider {
         )
     }
 
+    /// 发送流式Chat请求，返回SSE事件流
     pub async fn stream_chat(
         &self,
         request: StreamingChatRequest,
@@ -117,21 +119,38 @@ impl StreamingLlmProvider {
                 let bytes = chunk?;
                 buffer.push_str(&String::from_utf8_lossy(&bytes));
 
-                for line in buffer.lines() {
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
-                        if data == "[DONE]" {
-                            return;
-                        }
-                        if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
-                            if let Some(content) = chunk.choices.first().and_then(|c| c.delta.content.clone()) {
-                                yield content;
+                if let Some(last_newline) = buffer.rfind('\n') {
+                    let complete = buffer[..=last_newline].to_string();
+                    buffer = buffer[last_newline + 1..].to_string();
+
+                    for line in complete.lines() {
+                        if line.starts_with("data: ") {
+                            let data = &line[6..];
+                            if data == "[DONE]" {
+                                return;
+                            }
+                            if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
+                                if let Some(content) = chunk.choices.first().and_then(|c| c.delta.content.clone()) {
+                                    yield content;
+                                }
                             }
                         }
                     }
                 }
+            }
 
-                buffer.clear();
+            for line in buffer.lines() {
+                if line.starts_with("data: ") {
+                    let data = &line[6..];
+                    if data == "[DONE]" {
+                        return;
+                    }
+                    if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
+                        if let Some(content) = chunk.choices.first().and_then(|c| c.delta.content.clone()) {
+                            yield content;
+                        }
+                    }
+                }
             }
         };
 
@@ -154,6 +173,7 @@ impl StreamingLlmProvider {
     }
 }
 
+/// 逐块打印流式响应并返回完整文本
 pub async fn print_stream(mut stream: Pin<Box<dyn Stream<Item = Result<String>> + Send>>) -> Result<String> {
     use tokio::io::AsyncWriteExt;
     let mut full_response = String::new();

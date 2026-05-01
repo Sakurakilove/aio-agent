@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// Guardrail验证结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardrailResult {
     pub passed: bool,
@@ -9,6 +10,7 @@ pub struct GuardrailResult {
     pub action: GuardrailAction,
 }
 
+/// Guardrail动作类型：允许、警告、阻止、重写
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GuardrailAction {
     Allow,
@@ -211,6 +213,7 @@ impl Guardrail for RegexGuardrail {
     }
 }
 
+/// Guardrail管理器，管理输入/输出验证规则链
 pub struct GuardrailManager {
     pub input_guardrails: Vec<Arc<dyn Guardrail>>,
     pub output_guardrails: Vec<Arc<dyn Guardrail>>,

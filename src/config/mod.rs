@@ -81,6 +81,10 @@ pub struct Config {
     pub permissions: PermissionConfig,
 }
 
+fn default_system_prompt() -> String {
+    "You are a helpful AI assistant that can use tools to help users complete tasks. Please choose appropriate tools based on the user's needs and provide clear answers after obtaining results.".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     #[serde(default = "default_model")]
@@ -89,6 +93,8 @@ pub struct AgentConfig {
     pub max_iterations: usize,
     #[serde(default = "default_timeout_seconds")]
     pub timeout_seconds: u64,
+    #[serde(default = "default_system_prompt")]
+    pub system_prompt: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,6 +252,7 @@ impl Default for AgentConfig {
             model: default_model(),
             max_iterations: default_max_iterations(),
             timeout_seconds: default_timeout_seconds(),
+            system_prompt: default_system_prompt(),
         }
     }
 }

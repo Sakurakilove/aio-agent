@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// 消息角色枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Role {
     System,
@@ -10,6 +11,7 @@ pub enum Role {
     Tool,
 }
 
+/// 工具调用信息，包含调用ID、工具名称和参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
@@ -17,6 +19,7 @@ pub struct ToolCall {
     pub arguments: serde_json::Value,
 }
 
+/// 消息结构体，支持角色、内容、工具调用、工具结果和元数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
@@ -34,6 +37,7 @@ pub struct Message {
 }
 
 impl Message {
+    /// 创建基础消息
     pub fn new(role: Role, content: String) -> Self {
         Self {
             role,
@@ -58,6 +62,7 @@ impl Message {
         Self::new(Role::Assistant, content)
     }
 
+    /// 创建带工具调用的Assistant消息
     pub fn with_tool_calls(content: String, tool_calls: Vec<ToolCall>) -> Self {
         Self {
             role: Role::Assistant,
@@ -70,6 +75,7 @@ impl Message {
         }
     }
 
+    /// 创建工具执行结果消息，包含tool_call_id用于OpenAI API关联
     pub fn tool_result(tool_call_id: String, content: String, result: serde_json::Value) -> Self {
         Self {
             role: Role::Tool,

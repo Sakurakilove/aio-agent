@@ -1,6 +1,6 @@
 [package]
 name = "aio-agent"
-version = "1.0.0"
+version = "1.3.0"
 edition = "2021"
 authors = ["AIO Agent Contributors"]
 description = "All In One Agent - 集成化一站式AI Agent解决方案"

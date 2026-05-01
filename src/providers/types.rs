@@ -3,11 +3,13 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// LLM提供商，封装API密钥、基础URL和HTTP客户端
 pub struct LlmProvider {
     pub client: Client,
     pub api_key: String,
     pub base_url: String,
     pub default_model: String,
+    pub request_timeout: std::time::Duration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,15 +149,34 @@ pub struct ModelListResponse {
 }
 
 impl LlmProvider {
+    /// 对API密钥进行脱敏处理，仅显示前4位和后4位
+    pub fn mask_api_key(key: &str) -> String {
+        if key.len() <= 8 {
+            return "*".repeat(key.len());
+        }
+        format!("{}...{}", &key[..4], &key[key.len()-4..])
+    }
+
+    /// 获取当前提供商的脱敏API密钥
+    pub fn masked_api_key(&self) -> String {
+        Self::mask_api_key(&self.api_key)
+    }
+
+    /// 创建新的LLM提供商实例，默认120秒请求超时
     pub fn new(api_key: &str, base_url: &str, default_model: &str) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             api_key: api_key.to_string(),
             base_url: base_url.trim_end_matches('/').to_string(),
             default_model: default_model.to_string(),
+            request_timeout: std::time::Duration::from_secs(120),
         }
     }
 
+    /// 从环境变量创建默认配置的LLM提供商
     pub fn default_config() -> Self {
         Self::new(
             &std::env::var("AIO_AGENT_API_KEY").unwrap_or_default(),
@@ -164,6 +185,17 @@ impl LlmProvider {
         )
     }
 
+    /// 设置自定义请求超时时间
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.request_timeout = timeout;
+        self.client = Client::builder()
+            .timeout(timeout)
+            .build()
+            .unwrap_or_else(|_| self.client.clone());
+        self
+    }
+
+    /// 发送Chat Completion请求到LLM API
     pub async fn chat_completion(&self, request: ChatCompletionRequest) -> Result<ChatCompletionResponse> {
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -185,6 +217,7 @@ impl LlmProvider {
         Ok(result)
     }
 
+    /// 简单对话接口，发送消息列表并返回文本响应
     pub async fn simple_chat(&self, messages: Vec<ChatMessage>) -> Result<String> {
         let request = ChatCompletionRequest {
             model: self.default_model.clone(),
@@ -205,6 +238,7 @@ impl LlmProvider {
         }
     }
 
+    /// 获取可用模型列表
     pub async fn list_models(&self) -> Result<ModelListResponse> {
         let url = format!("{}/models", self.base_url);
 
@@ -224,6 +258,7 @@ impl LlmProvider {
         Ok(result)
     }
 
+    /// 测试API连接是否正常
     pub async fn test_connection(&self) -> Result<String> {
         let messages = vec![
             ChatMessage::system("你是一个测试助手。请简短回复以确认API连接正常。"),

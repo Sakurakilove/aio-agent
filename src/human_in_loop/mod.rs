@@ -4,6 +4,7 @@ use std::io::{self, Write};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// 人机审批结果：批准、拒绝（含原因）、修改后批准
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HumanApproval {
     Approved,
@@ -122,6 +123,7 @@ impl ApprovalHandler for AutoApprovalHandler {
     }
 }
 
+/// 人机协作（HITL）管理器，控制哪些操作需要人工审批
 pub struct HumanInTheLoop {
     pub handler: Arc<dyn ApprovalHandler>,
     pub approval_log: Arc<Mutex<Vec<(ApprovalRequest, HumanApproval)>>>,

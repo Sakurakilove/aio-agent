@@ -109,6 +109,7 @@ impl CliApp {
                 println!("  活跃提供商: {}", self.agent.config.providers.active);
                 println!("  模型: {}", self.agent.llm_provider.default_model);
                 println!("  API地址: {}", self.agent.llm_provider.base_url);
+                println!("  API密钥: {}", self.agent.llm_provider.masked_api_key());
                 println!("  最大迭代: {}", self.agent.config.agent.max_iterations);
                 println!("  超时: {}s", self.agent.config.agent.timeout_seconds);
                 println!("  工具数: {}", self.agent.tools.list_tools().len());

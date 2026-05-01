@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::providers::{LlmProvider, ChatMessage, ChatCompletionRequest};
 
+/// Agent定义，包含名称、指令、可用工具和可转交目标
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDefinition {
     pub name: String,
@@ -28,6 +29,7 @@ pub struct HandoffResult {
     pub should_handoff_to: Option<String>,
 }
 
+/// Agent转交管理器，支持LLM驱动的多Agent间对话转交
 pub struct HandoffManager {
     pub agents: HashMap<String, AgentDefinition>,
     pub llm_provider: LlmProvider,
@@ -93,8 +95,9 @@ impl HandoffManager {
             handoff_targets: vec!["writer".to_string(), "coder".to_string()],
         });
 
+        let all_agent_names: Vec<String> = self.agents.keys().cloned().filter(|k| k != "default").collect();
         if let Some(default) = self.agents.get_mut("default") {
-            default.handoff_targets = self.agents.keys().cloned().filter(|k| k != "default").collect();
+            default.handoff_targets = all_agent_names;
         }
     }
 

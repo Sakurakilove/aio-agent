@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use rusqlite::{Connection, params};
 
+/// 检查点数据，记录Agent在某个步骤的完整状态快照
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Checkpoint {
     pub id: String,
@@ -15,6 +16,7 @@ pub struct Checkpoint {
     pub created_at: i64,
 }
 
+/// 状态快照，包含Agent状态、工具结果和迭代信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateSnapshot {
     pub checkpoint_id: String,
@@ -25,6 +27,7 @@ pub struct StateSnapshot {
     pub timestamp: i64,
 }
 
+/// 检查点管理器，基于SQLite实现持久化存储
 pub struct CheckpointManager {
     conn: Connection,
 }

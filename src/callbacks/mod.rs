@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// 回调事件，记录事件类型、会话ID、时间戳和附加数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallbackEvent {
     pub event_type: CallbackEventType,
@@ -10,6 +11,7 @@ pub struct CallbackEvent {
     pub data: serde_json::Value,
 }
 
+/// 回调事件类型枚举，覆盖LLM、工具、Agent生命周期的13种事件
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CallbackEventType {
     LlmStart,
@@ -44,6 +46,7 @@ impl CallbackHandler for LoggingCallback {
     }
 }
 
+/// 回调管理器，支持多处理器注册和事件日志记录
 pub struct CallbackManager {
     handlers: Vec<Arc<dyn CallbackHandler>>,
     event_log: Arc<Mutex<Vec<CallbackEvent>>>,

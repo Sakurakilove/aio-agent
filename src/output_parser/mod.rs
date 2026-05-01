@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// 解析后的输出结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsedOutput {
     pub raw: String,
@@ -20,6 +21,7 @@ pub enum OutputFormat {
     List,
 }
 
+/// 结构化输出解析器，支持JSON/Markdown/KeyValue/List格式
 pub struct OutputParser;
 
 impl OutputParser {
@@ -76,7 +78,7 @@ impl OutputParser {
 
         ParsedOutput {
             raw: output.to_string(),
-            parsed: Some(Value::Object(map)),
+            parsed: Some(Value::Object(map.clone())),
             format: OutputFormat::KeyValue,
             parse_success: !map.is_empty(),
             error: if map.is_empty() { Some("未找到键值对".to_string()) } else { None },
@@ -108,7 +110,7 @@ impl OutputParser {
 
         ParsedOutput {
             raw: output.to_string(),
-            parsed: Some(Value::Object(sections)),
+            parsed: Some(Value::Object(sections.clone())),
             format: OutputFormat::Markdown,
             parse_success: !sections.is_empty(),
             error: None,
