@@ -25,6 +25,45 @@ pub enum OutputFormat {
 pub struct OutputParser;
 
 impl OutputParser {
+    /// 自动检测格式并解析输出内容
+    pub fn parse(&self, output: &str) -> ParsedOutput {
+        let trimmed = output.trim();
+
+        if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+            || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+            || trimmed.contains("```json")
+        {
+            return Self::parse_json(output);
+        }
+
+        if trimmed.contains('#') && (trimmed.contains("##") || trimmed.contains("# ")) {
+            let md_result = Self::parse_markdown_sections(output);
+            if md_result.parse_success {
+                return md_result;
+            }
+        }
+
+        if trimmed.contains(':') || trimmed.contains('=') {
+            let kv_result = Self::parse_key_value(output);
+            if kv_result.parse_success {
+                return kv_result;
+            }
+        }
+
+        let lines: Vec<&str> = trimmed.lines().collect();
+        if lines.len() > 1 {
+            return Self::parse_list(output);
+        }
+
+        ParsedOutput {
+            raw: output.to_string(),
+            parsed: None,
+            format: OutputFormat::Text,
+            parse_success: false,
+            error: Some("无法自动检测输出格式".to_string()),
+        }
+    }
+
     pub fn parse_json(output: &str) -> ParsedOutput {
         let trimmed = Self::extract_json_block(output);
         match serde_json::from_str::<Value>(&trimmed) {

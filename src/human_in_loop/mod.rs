@@ -170,7 +170,7 @@ impl HumanInTheLoop {
         if self.require_approval_for.contains(&action.to_string()) {
             return true;
         }
-        !self.skip_approval_for.contains(&action.to_string())
+        false
     }
 
     pub fn request_approval(&self, request: ApprovalRequest) -> HumanApproval {

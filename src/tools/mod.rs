@@ -1451,14 +1451,18 @@ impl Tool for BrowserNavigateTool {
 
     fn schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "要导航到的URL"
-                }
-            },
-            "required": ["url"]
+            "name": "browser_navigate",
+            "description": self.description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "要导航到的URL"
+                    }
+                },
+                "required": ["url"]
+            }
         })
     }
 
@@ -1516,23 +1520,27 @@ impl Tool for BrowserScreenshotTool {
 
     fn schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "要截图的页面URL"
+            "name": "browser_screenshot",
+            "description": self.description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "要截图的页面URL"
+                    },
+                    "full_page": {
+                        "type": "boolean",
+                        "description": "是否截取完整页面",
+                        "default": true
+                    },
+                    "save_path": {
+                        "type": "string",
+                        "description": "截图保存路径"
+                    }
                 },
-                "full_page": {
-                    "type": "boolean",
-                    "description": "是否截取完整页面",
-                    "default": true
-                },
-                "save_path": {
-                    "type": "string",
-                    "description": "截图保存路径"
-                }
-            },
-            "required": ["url"]
+                "required": ["url"]
+            }
         })
     }
 
@@ -1606,18 +1614,22 @@ impl Tool for BrowserClickTool {
 
     fn schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "页面URL"
+            "name": "browser_click",
+            "description": self.description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "页面URL"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS选择器"
+                    }
                 },
-                "selector": {
-                    "type": "string",
-                    "description": "CSS选择器"
-                }
-            },
-            "required": ["url", "selector"]
+                "required": ["url", "selector"]
+            }
         })
     }
 
@@ -1683,21 +1695,25 @@ impl Tool for BrowserFillFormTool {
 
     fn schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "页面URL"
-                },
-                "fields": {
-                    "type": "object",
-                    "description": "要填写的字段（选择器 -> 值）",
-                    "additionalProperties": {
-                        "type": "string"
+            "name": "browser_fill_form",
+            "description": self.description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "页面URL"
+                    },
+                    "fields": {
+                        "type": "object",
+                        "description": "要填写的字段（选择器 -> 值）",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
                     }
-                }
-            },
-            "required": ["url", "fields"]
+                },
+                "required": ["url", "fields"]
+            }
         })
     }
 
@@ -1776,14 +1792,18 @@ impl Tool for BrowserGetContentTool {
 
     fn schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "页面URL"
-                }
-            },
-            "required": ["url"]
+            "name": "browser_get_content",
+            "description": self.description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "页面URL"
+                    }
+                },
+                "required": ["url"]
+            }
         })
     }
 
@@ -1844,18 +1864,22 @@ impl Tool for BrowserEvaluateJsTool {
 
     fn schema(&self) -> serde_json::Value {
         serde_json::json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "页面URL"
+            "name": "browser_evaluate_js",
+            "description": self.description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "页面URL"
+                    },
+                    "script": {
+                        "type": "string",
+                        "description": "要执行的JavaScript代码"
+                    }
                 },
-                "script": {
-                    "type": "string",
-                    "description": "要执行的JavaScript代码"
-                }
-            },
-            "required": ["url", "script"]
+                "required": ["url", "script"]
+            }
         })
     }
 

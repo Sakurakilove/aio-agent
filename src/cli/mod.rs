@@ -143,6 +143,51 @@ impl CliApp {
             "/skills" => {
                 println!("Skills管理需要使用Skills模块");
             }
+            "/handoff" => {
+                if args.is_empty() {
+                    if self.agent.handoff_manager.is_none() {
+                        self.agent.enable_handoff();
+                    }
+                    println!("可用Agent:");
+                    for agent in self.agent.list_handoff_agents() {
+                        println!("  - {} (工具: {})", agent.name, agent.tools.join(", "));
+                    }
+                    println!("\n用法: /handoff <agent_name> [reason]");
+                } else {
+                    let parts: Vec<&str> = args.splitn(2, ' ').collect();
+                    let agent_name = parts[0];
+                    let reason = parts.get(1).unwrap_or(&"用户请求转交");
+                    if self.agent.handoff_manager.is_none() {
+                        self.agent.enable_handoff();
+                    }
+                    let mut rt = tokio::runtime::Runtime::new().unwrap();
+                    match rt.block_on(self.agent.handoff_to(agent_name, reason)) {
+                        Ok(result) => {
+                            if result.accepted {
+                                println!("✓ 已转交给Agent '{}': {}", result.agent_name, result.response);
+                            } else {
+                                println!("✗ 转交失败: {}", result.response);
+                            }
+                        }
+                        Err(e) => eprintln!("✗ 转交错误: {}", e),
+                    }
+                }
+            }
+            "/parse" => {
+                if args.is_empty() {
+                    println!("用法: /parse <text>  - 解析输出为结构化格式");
+                } else {
+                    let result = self.agent.parse_output(args);
+                    println!("格式: {:?}", result.format);
+                    println!("成功: {}", result.parse_success);
+                    if let Some(parsed) = result.parsed {
+                        println!("解析结果: {}", serde_json::to_string_pretty(&parsed).unwrap_or_default());
+                    }
+                    if let Some(error) = result.error {
+                        println!("错误: {}", error);
+                    }
+                }
+            }
             _ => {
                 println!("未知命令: {}", cmd);
                 println!("输入 'help' 查看可用命令");
@@ -157,6 +202,8 @@ impl CliApp {
         println!("  /config                   - 查看当前配置");
         println!("  /memory                   - 查看记忆会话");
         println!("  /provider [名称]          - 查看/切换提供商");
+        println!("  /handoff [agent] [reason] - 查看/执行Agent转交");
+        println!("  /parse <text>             - 解析输出为结构化格式");
         println!("  /skills                   - 查看Skills");
         println!("  status                    - 显示Agent状态");
         println!("  clear                     - 清屏");

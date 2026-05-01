@@ -234,6 +234,11 @@ impl GuardrailManager {
             vec!["rm -rf /", "sudo rm -rf", "format c:", "drop table"],
             vec!["password", "secret", "token", "api_key"],
         )));
+        manager.add_output_guardrail(Arc::new(LengthGuardrail::new(100000, 100000)));
+        manager.add_output_guardrail(Arc::new(KeywordGuardrail::new(
+            vec!["rm -rf /", "sudo rm -rf", "drop table"],
+            vec![],
+        )));
         manager
     }
 

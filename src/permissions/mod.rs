@@ -21,6 +21,10 @@ impl PermissionChecker {
             }
         }
 
+        if self.allow_rules.is_empty() {
+            return true;
+        }
+
         for pattern in &self.allow_rules {
             if Self::matches(pattern, action, resource) {
                 return true;

@@ -21,6 +21,8 @@ use crate::callbacks::{CallbackManager, CallbackEventType};
 use crate::guardrails::GuardrailManager;
 use crate::human_in_loop::HumanInTheLoop;
 use crate::checkpoint::{CheckpointManager, Checkpoint, StateSnapshot};
+use crate::handoff::HandoffManager;
+use crate::output_parser::OutputParser;
 
 /// Agent执行结果，包含最终响应、消息历史和统计信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +68,8 @@ pub struct AioAgent {
     pub guardrails: GuardrailManager,
     pub human_in_loop: HumanInTheLoop,
     pub checkpoint_manager: Option<CheckpointManager>,
+    pub handoff_manager: Option<HandoffManager>,
+    pub output_parser: OutputParser,
 }
 
 impl AioAgent {
@@ -91,35 +95,33 @@ impl AioAgent {
 
         let mut tools = ToolRegistry::new();
         
-        tools.register(Arc::new(WebSearchTool));
-        tools.register(Arc::new(FileReadTool));
-        tools.register(Arc::new(FileWriteTool));
-        tools.register(Arc::new(TerminalTool));
-        tools.register(Arc::new(WebFetchTool));
-        tools.register(Arc::new(SearchFilesTool));
-        tools.register(Arc::new(PatchFileTool));
-        tools.register(Arc::new(ListDirTool));
-        tools.register(Arc::new(JsonTool));
-        tools.register(Arc::new(UrlTool));
-        tools.register(Arc::new(TextTool));
-        tools.register(Arc::new(DateTimeTool));
-        tools.register(Arc::new(FileInfoTool));
-        tools.register(Arc::new(MkdirTool));
-        tools.register(Arc::new(RemoveTool));
-        tools.register(Arc::new(CopyTool));
-        tools.register(Arc::new(MoveTool));
-        tools.register(Arc::new(EnvTool));
-        tools.register(Arc::new(SystemInfoTool));
-        tools.register(Arc::new(CalculatorTool));
-        tools.register(Arc::new(Base64Tool));
-        tools.register(Arc::new(HashTool));
-        tools.register(Arc::new(RegexTool));
-        tools.register(Arc::new(BrowserNavigateTool));
-        tools.register(Arc::new(BrowserScreenshotTool));
-        tools.register(Arc::new(BrowserClickTool));
-        tools.register(Arc::new(BrowserFillFormTool));
-        tools.register(Arc::new(BrowserGetContentTool));
-        tools.register(Arc::new(BrowserEvaluateJsTool));
+        let enabled_tools: std::collections::HashSet<String> = config.tools.enabled.iter().cloned().collect();
+        let disabled_tools: std::collections::HashSet<String> = config.tools.disabled.iter().cloned().collect();
+
+        let all_tools: Vec<Arc<dyn crate::tools::Tool>> = vec![
+            Arc::new(WebSearchTool), Arc::new(FileReadTool), Arc::new(FileWriteTool),
+            Arc::new(TerminalTool), Arc::new(WebFetchTool), Arc::new(SearchFilesTool),
+            Arc::new(PatchFileTool), Arc::new(ListDirTool), Arc::new(JsonTool),
+            Arc::new(UrlTool), Arc::new(TextTool), Arc::new(DateTimeTool),
+            Arc::new(FileInfoTool), Arc::new(MkdirTool), Arc::new(RemoveTool),
+            Arc::new(CopyTool), Arc::new(MoveTool), Arc::new(EnvTool),
+            Arc::new(SystemInfoTool), Arc::new(CalculatorTool), Arc::new(Base64Tool),
+            Arc::new(HashTool), Arc::new(RegexTool),
+            Arc::new(BrowserNavigateTool), Arc::new(BrowserScreenshotTool),
+            Arc::new(BrowserClickTool), Arc::new(BrowserFillFormTool),
+            Arc::new(BrowserGetContentTool), Arc::new(BrowserEvaluateJsTool),
+        ];
+
+        for tool in all_tools {
+            let name = tool.name().to_string();
+            if disabled_tools.contains(&name) {
+                continue;
+            }
+            if !enabled_tools.is_empty() && !enabled_tools.contains(&name) {
+                continue;
+            }
+            tools.register(tool);
+        }
 
         let permissions = PermissionChecker::new(
             config.permissions.allow.clone(),
@@ -158,6 +160,8 @@ impl AioAgent {
             guardrails: GuardrailManager::with_defaults(),
             human_in_loop: HumanInTheLoop::console(true),
             checkpoint_manager,
+            handoff_manager: None,
+            output_parser: OutputParser,
         })
     }
 
@@ -237,13 +241,15 @@ impl AioAgent {
             }
         }).collect();
 
+        let tools = self.build_tool_definitions();
+
         let request = crate::providers::ChatCompletionRequest {
             model: self.llm_provider.default_model.clone(),
             messages: llm_messages,
             temperature: Some(0.7),
             max_tokens: Some(4096),
             stream: Some(false),
-            tools: None,
+            tools: if tools.is_empty() { None } else { Some(tools) },
             tool_choice: None,
         };
 
@@ -309,6 +315,67 @@ impl AioAgent {
         );
 
         Ok(())
+    }
+
+    /// 初始化HandoffManager并注册默认Agent
+    pub fn enable_handoff(&mut self) {
+        let mut handoff_mgr = HandoffManager::new(
+            LlmProvider::new(
+                &self.llm_provider.api_key,
+                &self.llm_provider.base_url,
+                &self.llm_provider.default_model,
+            ),
+            "default",
+        );
+        handoff_mgr.register_default_agents();
+        self.handoff_manager = Some(handoff_mgr);
+    }
+
+    /// 将当前对话转交给指定Agent
+    pub async fn handoff_to(&mut self, target_agent: &str, reason: &str) -> Result<crate::handoff::HandoffResult> {
+        if let Some(ref mut handoff_mgr) = self.handoff_manager {
+            let conversation_summary: String = self.messages.iter()
+                .filter(|m| m.role == Role::User || m.role == Role::Assistant)
+                .map(|m| m.content.chars().take(200).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let mut context = std::collections::HashMap::new();
+            context.insert("session_id".to_string(), serde_json::json!(self.session_id));
+            context.insert("messages_count".to_string(), serde_json::json!(self.messages.len()));
+
+            let request = crate::handoff::HandoffRequest {
+                from_agent: handoff_mgr.current_agent.clone(),
+                to_agent: target_agent.to_string(),
+                reason: reason.to_string(),
+                context,
+                conversation_summary,
+            };
+
+            let result = handoff_mgr.execute_handoff(request).await?;
+
+            self.callbacks.emit(
+                CallbackEventType::AgentEnd,
+                &self.session_id,
+                serde_json::json!({"handoff_to": target_agent, "accepted": result.accepted}),
+            );
+
+            Ok(result)
+        } else {
+            Err(anyhow::anyhow!("Handoff manager not enabled. Call enable_handoff() first."))
+        }
+    }
+
+    /// 列出可用的Handoff Agent
+    pub fn list_handoff_agents(&self) -> Vec<&crate::handoff::AgentDefinition> {
+        self.handoff_manager.as_ref()
+            .map(|m| m.list_agents())
+            .unwrap_or_default()
+    }
+
+    /// 使用OutputParser解析LLM输出为结构化格式
+    pub fn parse_output(&self, content: &str) -> crate::output_parser::ParsedOutput {
+        self.output_parser.parse(content)
     }
 
     /// 从持久化存储加载指定会话，恢复消息历史（含tool_calls和tool_call_id）

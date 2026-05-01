@@ -20,12 +20,7 @@ fn default_memory_path() -> String {
 }
 
 fn default_tools_enabled() -> Vec<String> {
-    vec![
-        "web_search".to_string(),
-        "file_read".to_string(),
-        "file_write".to_string(),
-        "terminal".to_string(),
-    ]
+    vec![]
 }
 
 fn default_tools_disabled() -> Vec<String> {
@@ -46,13 +41,21 @@ fn default_max_sessions() -> usize {
 
 fn default_permissions_allow() -> Vec<String> {
     vec![
-        "read_file(~/.aio-agent/**)".to_string(),
-        "write_to_file(~/.aio-agent/**)".to_string(),
+        "execute(file_read)".to_string(),
+        "execute(file_write)".to_string(),
+        "execute(web_search)".to_string(),
+        "execute(web_fetch)".to_string(),
+        "execute(list_dir)".to_string(),
+        "execute(terminal)".to_string(),
     ]
 }
 
 fn default_permissions_deny() -> Vec<String> {
-    vec!["execute_code(rm -rf /)".to_string()]
+    vec![
+        "execute(rm -rf /)".to_string(),
+        "execute(sudo rm -rf)".to_string(),
+        "execute(format c:)".to_string(),
+    ]
 }
 
 fn default_api_key() -> String {
